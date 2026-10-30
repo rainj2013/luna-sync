@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(UniformTypeIdentifiers)
 import UniformTypeIdentifiers
+#endif
 
 /// Metadata only: never reads image contents while listing a directory.
 public struct DiskEntry: Identifiable, Sendable {
@@ -76,7 +78,7 @@ public struct DiskDirectoryIndex: Sendable {
         var kinds: [String: DiskEntry.Kind] = [:]
         for url in urls {
             try Task.checkCancellation()
-            try autoreleasepool {
+            let readEntry = {
                 let values = try url.resourceValues(forKeys: keys)
                 guard values.isDirectory == true || values.isRegularFile == true else { return }
                 let ext = url.pathExtension.lowercased()
@@ -84,13 +86,32 @@ public struct DiskDirectoryIndex: Sendable {
                 if values.isDirectory == true { kind = .directory }
                 else if let cached = kinds[ext] { kind = cached }
                 else {
-                    let type = UTType(filenameExtension: ext)
-                    kind = type?.conforms(to: .image) == true ? .image : (type?.conforms(to: .movie) == true ? .video : .other)
+                    kind = Self.mediaKind(forExtension: ext)
                     kinds[ext] = kind
                 }
                 result.append(DiskEntry(url: url, kind: kind, size: values.fileSize.map(Int64.init), modifiedAt: values.contentModificationDate))
             }
+            #if canImport(ObjectiveC)
+            try autoreleasepool(invoking: readEntry)
+            #else
+            try readEntry()
+            #endif
         }
         return result
+    }
+
+    private static func mediaKind(forExtension ext: String) -> DiskEntry.Kind {
+        #if canImport(UniformTypeIdentifiers)
+        let type = UTType(filenameExtension: ext)
+        return type?.conforms(to: .image) == true ? .image : (type?.conforms(to: .movie) == true ? .video : .other)
+        #else
+        // Linux Foundation has no UTType registry; classify common original-media extensions.
+        switch ext {
+        case "jpg", "jpeg", "heic", "heif", "png", "gif", "tif", "tiff", "bmp", "webp", "avif",
+             "dng", "raw", "cr2", "cr3", "nef", "arw", "orf", "rw2", "raf": return .image
+        case "mov", "mp4", "m4v", "avi", "mkv", "mpg", "mpeg", "3gp", "webm": return .video
+        default: return .other
+        }
+        #endif
     }
 }

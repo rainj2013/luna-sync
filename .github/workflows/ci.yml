@@ -1,5 +1,12 @@
 name: Build and test
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   core:
     runs-on: ubuntu-22.04
@@ -9,9 +16,43 @@ jobs:
       - run: swift test
   ios:
     runs-on: macos-15
+    env:
+      # macos-15 defaults to Xcode 16.4, which cannot compile our Xcode 26 APIs/icon.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
       - name: Core tests (CryptoKit implementation)
         run: swift test
+      - name: Check localization
+        run: swift scripts/check-localization.swift
       - name: Build iOS application without signing
-        run: xcodebuild -project LunaSync.xcodeproj -scheme LunaSync -destination 'generic/platform=iOS Simulator' -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build
+        run: |
+          xcodebuild -project LunaSync.xcodeproj -scheme LunaSync \
+            -configuration Release -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build
+      - name: Build device application without signing
+        run: |
+          xcodebuild -project LunaSync.xcodeproj -scheme LunaSync \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build
+      - name: Package simulator app and unsigned IPA
+        run: |
+          mkdir -p DerivedData/artifacts DerivedData/package/Payload
+          ditto -c -k --sequesterRsrc --keepParent \
+            DerivedData/Build/Products/Release-iphonesimulator/LunaSync.app \
+            DerivedData/artifacts/LunaSync-simulator.zip
+          ditto DerivedData/Build/Products/Release-iphoneos/LunaSync.app \
+            DerivedData/package/Payload/LunaSync.app
+          cd DerivedData/package
+          ditto -c -k --keepParent Payload ../artifacts/LunaSync-unsigned.ipa
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LunaSync-${{ github.sha }}
+          path: DerivedData/artifacts/*
+          if-no-files-found: error
+          retention-days: 14

@@ -41,7 +41,7 @@ swift test
 
 测试使用模拟照片库及临时目录，覆盖增量识别、Live Photo 半完成、RAW+JPEG、取消、五个提交中断点、同大小内容损坏、文件缺失、目录穿越和符号链接、照片库重新关联、版本兼容与万张资产规划。它们不能替代真实 iPhone、PhotoKit 和外接硬盘验证。
 
-GitHub Actions 已配置 Linux 测试、macOS 测试和 iOS Simulator 无签名构建；仓库推送后才会执行。
+GitHub Actions 使用 Xcode 26.3，执行 Linux/macOS 测试、多语言检查和 iOS 模拟器/真机 Release 无签名构建，支持推送、PR 和手动运行。在成功运行的 **Artifacts** 中下载 `LunaSync-<commit SHA>`，其中包含模拟器 App ZIP 和 `LunaSync-unsigned.ipa`。无签名 IPA 需要自行签名后才能安装到 iPhone；此流程不执行 TestFlight 或 App Store 发布。产物保留 14 天，仅上传到 Actions，不提交到 Git 仓库。
 
 ## 数据与恢复
 
