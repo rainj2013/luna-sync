@@ -8,12 +8,6 @@ permissions:
   contents: read
 
 jobs:
-  core:
-    runs-on: ubuntu-22.04
-    container: swift:6.0.3-jammy
-    steps:
-      - uses: actions/checkout@v4
-      - run: swift test
   ios:
     runs-on: macos-15
     env:
