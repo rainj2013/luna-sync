@@ -54,7 +54,7 @@ public struct LibrarySource: Codable, Equatable, Identifiable, Sendable {
 }
 
 public struct ArchiveMetadata: Codable, Sendable {
-    public var formatVersion: Int = 1
+    public var formatVersion: Int = 2
     public let archiveID: UUID
     public let createdAt: Date
     public var sources: [LibrarySource]
@@ -90,15 +90,15 @@ public enum BackupFailure: Error, LocalizedError, Sendable {
     case corruptRecord(String), integrityMismatch, destinationUnavailable(String), unsupportedAsset(String)
     public var errorDescription: String? {
         switch self {
-        case .cloudOnly: return "原片不在本机，请开启 iCloud 原片下载后重试。"
-        case .permissionDenied: return "照片或目录权限不可用，请重新授权。"
+        case .cloudOnly: return BackupCopy.tr("diagnostic.3b5d56ec")
+        case .permissionDenied: return BackupCopy.tr("diagnostic.79299424")
         case .unavailable(let message): return message
-        case .unsafePath: return "备份路径不安全，已停止操作。"
-        case .unsupportedFormat(let version): return "无法写入格式版本 \(version) 的档案。"
-        case .corruptRecord(let key): return "备份记录损坏：\(key)"
-        case .integrityMismatch: return "文件读回校验失败，未标记为成功。"
-        case .destinationUnavailable(let message): return "备份目录不可写或已断开：\(message)"
-        case .unsupportedAsset(let message): return "资源组合需检查：\(message)"
+        case .unsafePath: return BackupCopy.tr("diagnostic.33c7d20d")
+        case .unsupportedFormat(let version): return BackupCopy.format("diagnostic.367bd51d", String(describing: version))
+        case .corruptRecord(let key): return BackupCopy.format("diagnostic.e5e5ff9b", String(describing: key))
+        case .integrityMismatch: return BackupCopy.tr("diagnostic.9216b214")
+        case .destinationUnavailable(let message): return BackupCopy.format("diagnostic.e1c44575", String(describing: message))
+        case .unsupportedAsset(let message): return BackupCopy.format("diagnostic.a48e2203", String(describing: message))
         }
     }
     public var stopsSession: Bool {
@@ -111,8 +111,40 @@ public enum BackupFailure: Error, LocalizedError, Sendable {
 
 public protocol PhotoLibrarySource: Sendable {
     func scan(includeVideos: Bool) async throws -> [AssetDescriptor]
+    func scan(includeVideos: Bool, selection: BackupSelection) async throws -> [AssetDescriptor]
     func read(asset: AssetDescriptor, resource: ResourceDescriptor, allowNetwork: Bool,
               consume: @escaping @Sendable (Data) throws -> Void) async throws
+}
+
+public extension PhotoLibrarySource {
+    func scan(includeVideos: Bool, selection: BackupSelection) async throws -> [AssetDescriptor] {
+        try await scan(includeVideos: includeVideos).filter(selection.includes)
+    }
+}
+
+public struct BackupSelection: Equatable, Sendable {
+    public let startDate: Date?
+    public let endDate: Date?
+    public let localIdentifiers: Set<String>?
+
+    public static let all = BackupSelection()
+
+    /// `endDate` is exclusive so callers can express complete calendar days
+    /// without depending on subsecond precision.
+    public init(startDate: Date? = nil, endDate: Date? = nil, localIdentifiers: Set<String>? = nil) {
+        self.startDate = startDate
+        self.endDate = endDate
+        self.localIdentifiers = localIdentifiers
+    }
+
+    public func includes(_ asset: AssetDescriptor) -> Bool {
+        if let localIdentifiers, !localIdentifiers.contains(asset.localIdentifier) { return false }
+        guard startDate != nil || endDate != nil else { return true }
+        guard let date = asset.creationDate else { return false }
+        if let startDate, date < startDate { return false }
+        if let endDate, date >= endDate { return false }
+        return true
+    }
 }
 
 public struct BackupPlan: Sendable {
@@ -120,6 +152,16 @@ public struct BackupPlan: Sendable {
     public var completed: Int = 0
     public var needsReview: [String: String] = [:]
     public init() {}
+}
+
+public struct BackupPreview: Sendable {
+    public let total: Int
+    public let completed: Int
+    public let photoCount: Int
+    public let videoCount: Int
+    public let pendingIdentifiers: [String]
+    public let issues: [String: String]
+    public var pendingCount: Int { pendingIdentifiers.count }
 }
 
 public enum BackupEvent: Sendable {

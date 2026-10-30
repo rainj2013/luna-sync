@@ -12,6 +12,8 @@ public enum CommitStage: Sendable { case prepared, dataWritten, verified, promot
 public final class ArchiveStore {
     public let root: URL
     public private(set) var metadata: ArchiveMetadata
+    private let metadataPrefix: String
+    public var markerURL: URL { root.appendingPathComponent(metadataPrefix + "archive.json") }
     private let fm = FileManager.default
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]; return encoder
@@ -22,23 +24,36 @@ public final class ArchiveStore {
 
     public init(root: URL, create: Bool = false) throws {
         self.root = root.standardizedFileURL.resolvingSymlinksInPath()
+        // Old archives keep their original records and receipt paths. New
+        // destinations use one hidden folder; media always goes directly in root.
+        let legacyMarker = self.root.appendingPathComponent("archive.json")
+        let hiddenMarker = self.root.appendingPathComponent(".luna-sync/archive.json")
+        let manager = FileManager.default
+        let hasLegacyRecords = manager.fileExists(atPath: self.root.appendingPathComponent("records").path)
+        let legacyIsSymlink = (try? manager.destinationOfSymbolicLink(atPath: legacyMarker.path)) != nil
+        let markerSize = (try? legacyMarker.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        let recognizedLegacyMarker = !legacyIsSymlink && markerSize <= 1_048_576 &&
+            (try? JSONDecoder().decode(ArchiveMetadata.self, from: Data(contentsOf: legacyMarker))) != nil
+        let hasLegacyArchive = manager.fileExists(atPath: legacyMarker.path) && (hasLegacyRecords || recognizedLegacyMarker)
+        metadataPrefix = manager.fileExists(atPath: hiddenMarker.path) || !hasLegacyArchive ? ".luna-sync/" : ""
         metadata = ArchiveMetadata()
-        let marker = self.root.appendingPathComponent("archive.json")
+        let marker = try safeURL(metadataPrefix + "archive.json")
         if fm.fileExists(atPath: marker.path) {
-            guard marker.resolvingSymlinksInPath().path.hasPrefix(self.root.path + "/") else { throw BackupFailure.unsafePath }
             do { metadata = try decoder.decode(ArchiveMetadata.self, from: Data(contentsOf: marker)) }
             catch { throw BackupFailure.corruptRecord("archive.json") }
-            guard metadata.formatVersion == 1 else { throw BackupFailure.unsupportedFormat(metadata.formatVersion) }
+            guard [1, 2].contains(metadata.formatVersion) else { throw BackupFailure.unsupportedFormat(metadata.formatVersion) }
         } else {
-            guard create else { throw BackupFailure.unavailable("所选目录没有 Luna Sync 档案。") }
-            // Never silently initialize over a damaged or unrelated nonempty archive.
-            if fm.fileExists(atPath: self.root.path), !(try fm.contentsOfDirectory(atPath: self.root.path)).isEmpty {
-                throw BackupFailure.unavailable("新档案目录必须为空，已有文件不会被覆盖。")
+            guard create else { throw BackupFailure.unavailable(BackupCopy.tr("diagnostic.45fbfc1b")) }
+            // Existing photos in the selected destination are allowed. Only the
+            // reserved metadata folder must be empty when creating a new archive.
+            let metadataDirectory = self.root.appendingPathComponent(".luna-sync", isDirectory: true)
+            if fm.fileExists(atPath: metadataDirectory.path), !(try fm.contentsOfDirectory(atPath: metadataDirectory.path)).isEmpty {
+                throw BackupFailure.unavailable(BackupCopy.tr("diagnostic.77ed12f5"))
             }
             try fm.createDirectory(at: self.root, withIntermediateDirectories: true)
-            try write(metadata, to: "archive.json")
+            try write(metadata, to: metadataPrefix + "archive.json")
         }
-        for directory in ["records", "transactions", "originals"] {
+        for directory in [metadataPrefix + "records", metadataPrefix + "transactions", ".luna-sync/staging"] {
             try fm.createDirectory(at: safeURL(directory), withIntermediateDirectories: true)
         }
         try probeWriteAccess()
@@ -47,7 +62,7 @@ public final class ArchiveStore {
     public func addSource(name: String) throws -> LibrarySource {
         let source = LibrarySource(name: name)
         var updated = metadata; updated.sources.append(source)
-        try write(updated, to: "archive.json"); metadata = updated
+        try write(updated, to: metadataPrefix + "archive.json"); metadata = updated
         return source
     }
 
@@ -58,6 +73,7 @@ public final class ArchiveStore {
             throw BackupFailure.unsafePath
         }
         let target = root.appendingPathComponent(relative).standardizedFileURL
+        guard target.path.hasPrefix(root.path + "/") else { throw BackupFailure.unsafePath }
         // Foundation on Linux may not resolve a symlink ancestor when the final
         // file does not exist. Reject symlink components explicitly, including
         // dangling links, rather than relying solely on URL normalization.
@@ -66,8 +82,6 @@ public final class ArchiveStore {
             ancestor.appendPathComponent(String(part))
             if (try? fm.destinationOfSymbolicLink(atPath: ancestor.path)) != nil { throw BackupFailure.unsafePath }
         }
-        let resolved = target.resolvingSymlinksInPath().path
-        guard resolved.hasPrefix(root.path + "/") else { throw BackupFailure.unsafePath }
         return target
     }
 
@@ -84,6 +98,7 @@ public final class ArchiveStore {
     public func snapshot() throws -> ArchiveSnapshot {
         var records: [AssetRecord] = [], issues: [String] = []
         for path in try recordPaths() {
+            try Task.checkCancellation()
             do {
                 let record = try read(AssetRecord.self, from: path)
                 try validate(record)
@@ -96,16 +111,17 @@ public final class ArchiveStore {
 
     public func plan(assets: [AssetDescriptor], sourceID: UUID) throws -> BackupPlan {
         guard metadata.sources.contains(where: { $0.id == sourceID }) else {
-            throw BackupFailure.unavailable("请先选择照片库来源。")
+            throw BackupFailure.unavailable(BackupCopy.tr("diagnostic.62d1f3d8"))
         }
         var plan = BackupPlan()
         for asset in assets {
+            try Task.checkCancellation()
             if let issue = asset.issue { plan.needsReview[asset.localIdentifier] = issue; continue }
-            if asset.resources.isEmpty { plan.needsReview[asset.localIdentifier] = "未找到原始资源"; continue }
+            if asset.resources.isEmpty { plan.needsReview[asset.localIdentifier] = BackupCopy.tr("diagnostic.9aabd449"); continue }
             let record: AssetRecord?
             do { record = try self.record(for: asset, sourceID: sourceID) }
             catch BackupFailure.corruptRecord(let message) {
-                plan.needsReview[asset.localIdentifier] = "记录损坏，已保留文件并跳过该资产：\(message)"
+                plan.needsReview[asset.localIdentifier] = BackupCopy.format("diagnostic.571e183e", String(describing: message))
                 continue
             }
             if let generation = record?.generations.last(where: { $0.asset.fingerprint == asset.fingerprint }),
@@ -127,10 +143,10 @@ public final class ArchiveStore {
             guard let current = byID[record.localIdentifier] else { continue }
             overlap += 1
             guard record.generations.contains(where: { $0.asset.fingerprint == current.fingerprint }) else {
-                throw BackupFailure.unavailable("照片库关联存在冲突，请作为新照片库备份。")
+                throw BackupFailure.unavailable(BackupCopy.tr("diagnostic.31811ad8"))
             }
         }
-        guard overlap > 0 else { throw BackupFailure.unavailable("无法核对原照片库，请授予更多照片权限或作为新照片库备份。") }
+        guard overlap > 0 else { throw BackupFailure.unavailable(BackupCopy.tr("diagnostic.bc1a4178")) }
     }
 
     public func ensureGeneration(asset: AssetDescriptor, sourceID: UUID) throws -> AssetGeneration {
@@ -167,22 +183,43 @@ public final class ArchiveStore {
     func prepare(asset: AssetDescriptor, sourceID: UUID, generation: AssetGeneration,
                  resource: ResourceDescriptor) throws -> Transaction {
         let id = UUID(), key = asset.key(sourceID: sourceID)
-        var datePath = "undated"
-        if let date = asset.creationDate {
-            var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-            let parts = calendar.dateComponents([.year, .month], from: date)
-            datePath = String(format: "%04d/%02d", parts.year!, parts.month!)
+        if metadata.formatVersion == 1 {
+            var upgraded = metadata; upgraded.formatVersion = 2
+            try write(upgraded, to: metadataPrefix + "archive.json")
+            metadata = upgraded
         }
-        // Each attempt uses a new filename; damaged originals are never overwritten.
-        let directory = "originals/\(datePath)/\(key)/\(generation.id.uuidString.lowercased())"
-        let finalPath = "\(directory)/\(resource.key)-\(id.uuidString.lowercased()).\(resource.fileExtension)"
+        // Keep the archive pleasant to browse outside Luna Sync. The original
+        // filename is used whenever possible; a suffix is added only to avoid
+        // overwriting an existing file (including a damaged earlier attempt).
+        let finalPath = try availablePath(filename: resource.originalFilename,
+                                          fallbackExtension: resource.fileExtension)
         let transaction = Transaction(id: id, assetKey: key, sourceID: sourceID,
             generationID: generation.id, asset: asset, resource: resource,
-            partialPath: finalPath + ".partial", finalPath: finalPath, receipt: nil)
-        try fm.createDirectory(at: safeURL(directory), withIntermediateDirectories: true)
+            partialPath: stagingPath(id), finalPath: finalPath, receipt: nil)
         try write(transaction, to: transactionPath(id))
         try checkpoint?(.prepared)
         return transaction
+    }
+
+    private func availablePath(filename: String, fallbackExtension: String) throws -> String {
+        let proposed = (filename as NSString).lastPathComponent
+        let valid = !proposed.isEmpty && proposed != "." && proposed != ".." &&
+            !proposed.contains("/") && !proposed.contains("\\") && !proposed.contains("\0")
+        let safeName = valid ? proposed : "photo.\(fallbackExtension)"
+        let stem = (safeName as NSString).deletingPathExtension
+        let ext = (safeName as NSString).pathExtension
+        var candidate = safeName
+        var suffix = 2
+        while try pathExists(candidate) || pathExists(candidate + ".partial") {
+            let next = "\(stem) (\(suffix))" + (ext.isEmpty ? "" : ".\(ext)")
+            candidate = next
+            suffix += 1
+        }
+        return candidate
+    }
+
+    private func pathExists(_ relativePath: String) throws -> Bool {
+        fm.fileExists(atPath: try safeURL(relativePath).path)
     }
 
     func commit(_ initial: Transaction, bytes: UInt64, hash: String) throws {
@@ -204,10 +241,10 @@ public final class ArchiveStore {
 
     public func recover() throws -> [String] {
         var warnings: [String] = []
-        let directory = try safeURL("transactions")
+        let directory = try safeURL(metadataPrefix + "transactions")
         for url in try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).sorted(by: { $0.path < $1.path })
             where url.pathExtension == "json" {
-            let path = "transactions/" + url.lastPathComponent
+            let path = metadataPrefix + "transactions/" + url.lastPathComponent
             do {
                 let transaction = try read(Transaction.self, from: path)
                 guard transactionPath(transaction.id) == path,
@@ -216,7 +253,9 @@ public final class ArchiveStore {
                     throw BackupFailure.corruptRecord(path)
                 }
                 let final = try safeURL(transaction.finalPath), partial = try safeURL(transaction.partialPath)
-                guard transaction.finalPath.hasPrefix("originals/"), transaction.partialPath == transaction.finalPath + ".partial",
+                let legacyPartial = transaction.finalPath.hasPrefix("originals/") && transaction.partialPath == transaction.finalPath + ".partial"
+                guard isResourcePath(transaction.finalPath),
+                      transaction.partialPath == stagingPath(transaction.id) || legacyPartial,
                       transaction.receipt == nil || transaction.receipt?.relativePath == transaction.finalPath else {
                     throw BackupFailure.unsafePath
                 }
@@ -232,7 +271,7 @@ public final class ArchiveStore {
                         if actual.bytes == receipt.byteCount && actual.hash == receipt.sha256 { try apply(transaction) }
                         else {
                             try invalidate(assetKey: transaction.assetKey, generationID: transaction.generationID, receipt: receipt)
-                            warnings.append("校验失败，保留文件并安排重传：\(transaction.asset.localIdentifier)")
+                            warnings.append(BackupCopy.format("diagnostic.0e868856", String(describing: transaction.asset.localIdentifier)))
                         }
                     }
                 }
@@ -259,12 +298,12 @@ public final class ArchiveStore {
                     do {
                         let actual = try SHA256Digest.file(safeURL(receipt.relativePath))
                         if actual.bytes != receipt.byteCount || actual.hash != receipt.sha256 {
-                            result.issues.append("校验不符：\(receipt.relativePath)")
+                            result.issues.append(BackupCopy.format("diagnostic.abe088ce", String(describing: receipt.relativePath)))
                             // Invalidate the receipt; leave the damaged file for inspection.
                             try invalidate(assetKey: record.assetKey, generationID: generation.id, receipt: receipt)
                         }
                     } catch {
-                        result.issues.append("无法校验：\(receipt.relativePath)：\(error.localizedDescription)")
+                        result.issues.append(BackupCopy.format("diagnostic.d4dd2d51", String(describing: receipt.relativePath), String(describing: error.localizedDescription)))
                         try invalidate(assetKey: record.assetKey, generationID: generation.id, receipt: receipt)
                     }
                     result.checked += 1; progress(result.checked)
@@ -275,7 +314,7 @@ public final class ArchiveStore {
     }
 
     private func apply(_ transaction: Transaction) throws {
-        guard let receipt = transaction.receipt else { throw BackupFailure.corruptRecord("事务没有校验值") }
+        guard let receipt = transaction.receipt else { throw BackupFailure.corruptRecord(BackupCopy.tr("diagnostic.2c51ebce")) }
         var record = try loadRecord(key: transaction.assetKey) ?? AssetRecord(assetKey: transaction.assetKey,
             sourceID: transaction.sourceID, localIdentifier: transaction.asset.localIdentifier, generations: [])
         if !record.generations.contains(where: { $0.id == transaction.generationID }) {
@@ -305,7 +344,7 @@ public final class ArchiveStore {
         for generation in record.generations {
             for (key, receipt) in generation.resources {
                 guard key == receipt.descriptor.key, generation.asset.resources.contains(receipt.descriptor),
-                      receipt.relativePath.hasPrefix("originals/"), receipt.byteCount > 0,
+                      isResourcePath(receipt.relativePath), receipt.byteCount > 0,
                       receipt.sha256.count == 64 else { throw BackupFailure.corruptRecord(record.assetKey) }
                 _ = try safeURL(receipt.relativePath)
             }
@@ -320,18 +359,28 @@ public final class ArchiveStore {
         guard record.assetKey == key else { throw BackupFailure.corruptRecord(path) }
         return record
     }
-    private func recordPath(_ key: String) -> String { "records/\(key.prefix(2))/\(key).json" }
-    private func transactionPath(_ id: UUID) -> String { "transactions/\(id.uuidString.lowercased()).json" }
+    private func recordPath(_ key: String) -> String { metadataPrefix + "records/\(key.prefix(2))/\(key).json" }
+    private func transactionPath(_ id: UUID) -> String { metadataPrefix + "transactions/\(id.uuidString.lowercased()).json" }
+    private func stagingPath(_ id: UUID) -> String { ".luna-sync/staging/\(id.uuidString.lowercased()).partial" }
+    private func isResourcePath(_ path: String) -> Bool {
+        guard !path.hasPrefix(".luna-sync/"), path != ".luna-sync" else { return false }
+        if metadataPrefix.isEmpty && (path == "archive.json" || path.hasPrefix("records/") || path.hasPrefix("transactions/")) { return false }
+        return true
+    }
     private func recordPaths() throws -> [String] {
-        let base = try safeURL("records")
+        let base = try safeURL(metadataPrefix + "records")
+        let canonicalBase = try canonicalExistingPath(base)
         var traversalError: Error?
         guard let enumerator = fm.enumerator(at: base, includingPropertiesForKeys: [.isSymbolicLinkKey],
             options: [], errorHandler: { _, error in traversalError = error; return false }) else {
-            throw BackupFailure.destinationUnavailable("无法读取索引目录")
+            throw BackupFailure.destinationUnavailable(BackupCopy.tr("diagnostic.e00aaa8b"))
         }
         var paths: [String] = []
         for case let url as URL in enumerator where url.pathExtension == "json" {
-            let path = String(url.path.dropFirst(root.path.count + 1))
+            let canonical = try canonicalExistingPath(url)
+            guard canonical.hasPrefix(canonicalBase + "/") else { throw BackupFailure.unsafePath }
+            let suffix = String(canonical.dropFirst(canonicalBase.count + 1))
+            let path = metadataPrefix + "records/\(suffix)"
             _ = try safeURL(path); paths.append(path)
         }
         if let traversalError { throw BackupFailure.destinationUnavailable(traversalError.localizedDescription) }
@@ -342,6 +391,13 @@ public final class ArchiveStore {
         catch let error as BackupFailure { throw error }
         catch let error as DecodingError { throw BackupFailure.corruptRecord("\(relative)：\(error.localizedDescription)") }
         catch { throw BackupFailure.destinationUnavailable(error.localizedDescription) }
+    }
+
+    private func canonicalExistingPath(_ url: URL) throws -> String {
+        let pointer = url.path.withCString { realpath($0, nil) }
+        guard let pointer else { throw BackupFailure.destinationUnavailable(String(cString: strerror(errno))) }
+        defer { free(pointer) }
+        return String(cString: pointer)
     }
     private func write<T: Encodable>(_ value: T, to relative: String) throws {
         let url = try safeURL(relative)
@@ -364,7 +420,7 @@ public final class ArchiveStore {
         }
     }
     private func probeWriteAccess() throws {
-        let probe = try safeURL(".probe-\(UUID().uuidString)")
+        let probe = try safeURL(".luna-sync/.probe-\(UUID().uuidString)")
         do { try Data([0]).write(to: probe, options: .withoutOverwriting); try fm.removeItem(at: probe) }
         catch { throw BackupFailure.destinationUnavailable(error.localizedDescription) }
     }

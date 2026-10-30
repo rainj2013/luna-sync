@@ -9,11 +9,18 @@ private final class FakeSource: PhotoLibrarySource, @unchecked Sendable {
     var chunkDelay: UInt64 = 0
     private let lock = NSLock()
     private var readCount = 0
+    private var scannedSelections: [BackupSelection] = []
+    var selections: [BackupSelection] { lock.lock(); defer { lock.unlock() }; return scannedSelections }
     var reads: Int { lock.lock(); defer { lock.unlock() }; return readCount }
     init(_ assets: [AssetDescriptor]) { self.assets = assets }
     func scan(includeVideos: Bool) async throws -> [AssetDescriptor] {
         assets.filter { includeVideos || $0.mediaType != 2 }
     }
+    func scan(includeVideos: Bool, selection: BackupSelection) async throws -> [AssetDescriptor] {
+        recordScan(selection)
+        return try await scan(includeVideos: includeVideos).filter(selection.includes)
+    }
+    private func recordScan(_ selection: BackupSelection) { lock.lock(); scannedSelections.append(selection); lock.unlock() }
     func read(asset: AssetDescriptor, resource: ResourceDescriptor, allowNetwork: Bool,
               consume: @escaping @Sendable (Data) throws -> Void) async throws {
         countRead()
@@ -69,6 +76,123 @@ final class BackupTests: XCTestCase {
         XCTAssertEqual(hash.finalize(), "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
     }
 
+    func testPreviewAndBackupRequestOnlySelectedAssets() async throws {
+        let (store, sourceID) = try makeStore()
+        let source = FakeSource((0..<50_000).map { asset("photo/\($0)") })
+        let coordinator = BackupCoordinator(store: store, source: source)
+        let selection = BackupSelection(localIdentifiers: ["photo/49999"])
+        let preview = try await coordinator.preview(sourceID: sourceID, includeVideos: true, selection: selection)
+        XCTAssertEqual(preview.total, 1)
+        try await coordinator.run(sourceID: sourceID, includeVideos: true, allowNetwork: false, requireAssociationCheck: false,
+                                  selection: selection, events: { _ in })
+        XCTAssertEqual(source.selections, [selection, selection])
+        XCTAssertEqual(source.reads, 1)
+    }
+
+    func testReassociationStillScansWholeLibraryWithPartialSelection() async throws {
+        let (store, sourceID) = try makeStore()
+        let existing = asset("photo/existing")
+        try commit(store, existing, sourceID, existing.resources[0])
+        let source = FakeSource([existing, asset("photo/new")])
+        let coordinator = BackupCoordinator(store: store, source: source)
+        let selection = BackupSelection(localIdentifiers: ["photo/new"])
+        let preview = try await coordinator.preview(sourceID: sourceID, includeVideos: true, selection: selection, requireAssociationCheck: true)
+        XCTAssertEqual(preview.total, 1)
+        try await coordinator.run(sourceID: sourceID, includeVideos: true, allowNetwork: false, requireAssociationCheck: true,
+                                  selection: selection, events: { _ in })
+        XCTAssertEqual(source.selections, [.all, .all])
+        XCTAssertEqual(source.reads, 1)
+    }
+
+    func testBackupSelectionUsesExclusiveEndAndExcludesUndatedAssets() {
+        let start = Date(timeIntervalSince1970: 100)
+        let end = Date(timeIntervalSince1970: 200)
+        let selection = BackupSelection(startDate: start, endDate: end)
+        XCTAssertTrue(selection.includes(AssetDescriptor(localIdentifier: "start", creationDate: start, resources: [resource()])))
+        XCTAssertTrue(selection.includes(AssetDescriptor(localIdentifier: "inside", creationDate: Date(timeIntervalSince1970: 199), resources: [resource()])))
+        XCTAssertFalse(selection.includes(AssetDescriptor(localIdentifier: "end", creationDate: end, resources: [resource()])))
+        XCTAssertFalse(selection.includes(asset("undated")))
+        XCTAssertTrue(BackupSelection.all.includes(asset("undated")))
+    }
+
+    func testBackupSelectionCanUseExplicitPhotoIdentifiers() {
+        let selection = BackupSelection(localIdentifiers: ["photo/1", "photo/3"])
+        XCTAssertTrue(selection.includes(asset("photo/1")))
+        XCTAssertFalse(selection.includes(asset("photo/2")))
+        XCTAssertTrue(selection.includes(asset("photo/3")))
+    }
+
+    func testPreviewCountsPendingResourcesWithoutExportingOrCommitting() async throws {
+        let (store, sourceID) = try makeStore()
+        let saved = asset("saved"), pending = asset("pending")
+        let video = AssetDescriptor(localIdentifier: "video", mediaType: 2, resources: [resource(2, name: "clip.MOV")])
+        let unsupported = AssetDescriptor(localIdentifier: "unsupported", resources: [], issue: "Needs review")
+        try commit(store, saved, sourceID, saved.resources[0])
+        let source = FakeSource([saved, pending, video, unsupported])
+        let coordinator = BackupCoordinator(store: store, source: source)
+        let preview = try await coordinator.preview(sourceID: sourceID, includeVideos: true)
+        XCTAssertEqual(preview.total, 4)
+        XCTAssertEqual(preview.completed, 1)
+        XCTAssertEqual(preview.photoCount, 1)
+        XCTAssertEqual(preview.videoCount, 1)
+        XCTAssertEqual(Set(preview.pendingIdentifiers), ["pending", "video"])
+        XCTAssertEqual(preview.issues["unsupported"], "Needs review")
+        XCTAssertEqual(source.reads, 0)
+        XCTAssertEqual(try store.records().count, 1)
+
+        let selected = try await coordinator.preview(sourceID: sourceID, includeVideos: false,
+                                                     selection: BackupSelection(localIdentifiers: ["pending"]))
+        XCTAssertEqual(selected.total, 1)
+        XCTAssertEqual(selected.pendingCount, 1)
+        XCTAssertEqual(selected.videoCount, 0)
+        XCTAssertEqual(source.reads, 0)
+    }
+
+    func testBackupCoordinatorOnlyTransfersSelectedDateRange() async throws {
+        let (store, sourceID) = try makeStore()
+        let old = AssetDescriptor(localIdentifier: "old", creationDate: Date(timeIntervalSince1970: 50), resources: [resource()])
+        let selected = AssetDescriptor(localIdentifier: "selected", creationDate: Date(timeIntervalSince1970: 150), resources: [resource()])
+        let source = FakeSource([old, selected])
+        let coordinator = BackupCoordinator(store: store, source: source)
+        try await coordinator.run(sourceID: sourceID, includeVideos: true, allowNetwork: false,
+                                  requireAssociationCheck: false,
+                                  selection: BackupSelection(startDate: Date(timeIntervalSince1970: 100),
+                                                             endDate: Date(timeIntervalSince1970: 200)),
+                                  events: { _ in })
+        XCTAssertEqual(source.reads, 1)
+        XCTAssertEqual(try store.plan(assets: [selected], sourceID: sourceID).completed, 1)
+        XCTAssertEqual(try store.plan(assets: [old], sourceID: sourceID).pending.count, 1)
+    }
+
+    func testSupplementaryAdjustmentCompatibilityMatchesTypeAndContent() {
+        XCTAssertTrue(PhotoResourceCompatibility.isSupplementaryAdjustment(
+            type: 16, uniformTypeIdentifier: "com.apple.photos.apple-adjustment-envelope"))
+        XCTAssertFalse(PhotoResourceCompatibility.isSupplementaryAdjustment(type: 16, uniformTypeIdentifier: "public.heic"))
+        XCTAssertFalse(PhotoResourceCompatibility.isSupplementaryAdjustment(
+            type: 99, uniformTypeIdentifier: "com.apple.photos.apple-adjustment-envelope"))
+        XCTAssertFalse(PhotoResourceCompatibility.isSupplementaryAdjustment(type: 1, uniformTypeIdentifier: "public.heic"))
+    }
+
+    func testHEICAndVideoLongerThanTwoMinutesKeepOriginalBytes() async throws {
+        let (store, sourceID) = try makeStore()
+        let photoResource = ResourceDescriptor(type: 1, ordinal: 0, originalFilename: "PHOTO.HEIC", uniformTypeIdentifier: "public.heic")
+        let videoResource = ResourceDescriptor(type: 2, ordinal: 0, originalFilename: "LONG.MOV", uniformTypeIdentifier: "com.apple.quicktime-movie")
+        let photo = AssetDescriptor(localIdentifier: "heic", resources: [photoResource])
+        let video = AssetDescriptor(localIdentifier: "long-video", mediaType: 2, duration: 3600, resources: [videoResource])
+        let coordinator = BackupCoordinator(store: store, source: FakeSource([photo, video]))
+        let preview = try await coordinator.preview(sourceID: sourceID, includeVideos: true)
+        XCTAssertEqual(preview.pendingCount, 2)
+        XCTAssertTrue(preview.issues.isEmpty)
+        try await run(coordinator, sourceID: sourceID)
+        for asset in [photo, video] {
+            let resource = try XCTUnwrap(asset.resources.first)
+            let record = try XCTUnwrap(store.record(for: asset, sourceID: sourceID))
+            let receipt = try XCTUnwrap(record.generations.last?.resources[resource.key])
+            XCTAssertEqual(receipt.relativePath, resource.originalFilename)
+            XCTAssertEqual(try Data(contentsOf: store.root.appendingPathComponent(receipt.relativePath)), FakeSource.content(asset, resource))
+        }
+    }
+
     func testIncrementalSameNamesAndLateImportedOldPhoto() async throws {
         let (store, sourceID) = try makeStore()
         let first = asset(), second = asset("another/1")
@@ -85,6 +209,124 @@ final class BackupTests: XCTestCase {
         XCTAssertEqual(try store.plan(assets: [first, second, old], sourceID: sourceID).completed, 3)
         let paths = try store.records().flatMap { $0.generations.flatMap { $0.resources.values.map(\.relativePath) } }
         XCTAssertEqual(Set(paths).count, 3)
+    }
+
+    func testOriginalFilenameIsUsedAndCollisionGetsSuffix() throws {
+        let (store, sourceID) = try makeStore()
+        let first = asset("first")
+        let second = asset("second")
+        try commit(store, first, sourceID, first.resources[0])
+        try commit(store, second, sourceID, second.resources[0])
+        let firstPath = try XCTUnwrap(store.record(for: first, sourceID: sourceID)?.generations.first?.resources.values.first?.relativePath)
+        let secondPath = try XCTUnwrap(store.record(for: second, sourceID: sourceID)?.generations.first?.resources.values.first?.relativePath)
+        XCTAssertEqual(firstPath, "IMG_0001.HEIC")
+        XCTAssertEqual(secondPath, "IMG_0001 (2).HEIC")
+    }
+
+    func testFlatDestinationPreservesUnrelatedPhotosAndKeepsMetadataHidden() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        roots.append(root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let existing = Data("an unrelated existing photo".utf8)
+        try existing.write(to: root.appendingPathComponent("IMG_0001.HEIC"))
+        let unrelatedArchive = Data("{\"belongsTo\":\"another app\"}".utf8)
+        try unrelatedArchive.write(to: root.appendingPathComponent("archive.json"))
+        let store = try ArchiveStore(root: root, create: true)
+        let sourceID = try store.addSource(name: "Phone").id
+        let photo = AssetDescriptor(localIdentifier: "dated", creationDate: Date(), resources: [resource()])
+        try commit(store, photo, sourceID, photo.resources[0])
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("IMG_0001.HEIC")), existing)
+        XCTAssertEqual(try store.record(for: photo, sourceID: sourceID)?.generations.last?.resources.values.first?.relativePath, "IMG_0001 (2).HEIC")
+        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: root.path)), [".luna-sync", "archive.json", "IMG_0001.HEIC", "IMG_0001 (2).HEIC"])
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("archive.json")), unrelatedArchive)
+        XCTAssertEqual(store.markerURL, root.appendingPathComponent(".luna-sync/archive.json"))
+        XCTAssertEqual(try ArchiveStore(root: root).plan(assets: [photo], sourceID: sourceID).completed, 1)
+    }
+
+    func testUnrelatedHiddenMetadataFolderIsNotOverwritten() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        roots.append(root)
+        let metadata = root.appendingPathComponent(".luna-sync")
+        try FileManager.default.createDirectory(at: metadata, withIntermediateDirectories: true)
+        let existing = Data("keep this file".utf8), file = metadata.appendingPathComponent("unrelated.txt")
+        try existing.write(to: file)
+        XCTAssertThrowsError(try ArchiveStore(root: root, create: true))
+        XCTAssertEqual(try Data(contentsOf: file), existing)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: metadata.appendingPathComponent("archive.json").path))
+    }
+
+    func testFlatRecoveryCannotPromotePhotoOverMetadata() throws {
+        let (store, sourceID) = try makeStore(), photo = asset()
+        let originalHeader = try Data(contentsOf: store.markerURL)
+        let generation = try store.ensureGeneration(asset: photo, sourceID: sourceID)
+        let transaction = try store.prepare(asset: photo, sourceID: sourceID, generation: generation, resource: photo.resources[0])
+        let path = try store.safeURL(".luna-sync/transactions/\(transaction.id.uuidString.lowercased()).json")
+        var json = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as! [String: Any]
+        json["finalPath"] = ".luna-sync/archive.json"
+        try JSONSerialization.data(withJSONObject: json).write(to: path)
+        XCTAssertThrowsError(try store.recover())
+        XCTAssertEqual(try Data(contentsOf: store.markerURL), originalHeader)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path.path))
+    }
+
+    func testHiddenMetadataSymlinkCannotEscapeDestination() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        roots.append(contentsOf: [root, outside])
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent(".luna-sync"), withDestinationURL: outside)
+        XCTAssertThrowsError(try ArchiveStore(root: root, create: true))
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: outside.path).isEmpty)
+    }
+
+    func testLegacyArchiveRemainsReadableAndNewFilesAreFlat() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        roots.append(root)
+        let source = LibrarySource(name: "Legacy phone")
+        var metadata = ArchiveMetadata(); metadata.formatVersion = 1; metadata.sources = [source]
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try JSONEncoder().encode(metadata).write(to: root.appendingPathComponent("archive.json"))
+        let old = asset("old"), data = FakeSource.content(old, old.resources[0])
+        let relative = "originals/2020-01/IMG_0001.HEIC", oldFile = root.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: oldFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: oldFile)
+        let receipt = ResourceReceipt(descriptor: old.resources[0], relativePath: relative, byteCount: UInt64(data.count), sha256: SHA256Digest.hex(data), completedAt: Date())
+        let generation = AssetGeneration(id: UUID(), asset: old, resources: [old.resources[0].key: receipt])
+        let key = old.key(sourceID: source.id)
+        let record = AssetRecord(assetKey: key, sourceID: source.id, localIdentifier: old.localIdentifier, generations: [generation])
+        let recordFile = root.appendingPathComponent("records/\(key.prefix(2))/\(key).json")
+        try FileManager.default.createDirectory(at: recordFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(record).write(to: recordFile)
+
+        let store = try ArchiveStore(root: root)
+        XCTAssertEqual(try store.plan(assets: [old], sourceID: source.id).completed, 1)
+        let added = AssetDescriptor(localIdentifier: "new", resources: [resource(name: "NEW.HEIC")])
+        try commit(store, added, source.id, added.resources[0])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("NEW.HEIC").path))
+        XCTAssertEqual(try Data(contentsOf: oldFile), data)
+        let reopened = try ArchiveStore(root: root)
+        XCTAssertEqual(reopened.metadata.formatVersion, 2)
+        XCTAssertEqual(try reopened.plan(assets: [old, added], sourceID: source.id).completed, 2)
+        XCTAssertTrue(try reopened.verify().issues.isEmpty)
+    }
+
+    func testRangeSelectionExpandsImmediatelyAcrossManyPages() {
+        let identifiers = (0..<10_000).map { "photo/\($0)" }
+        var selection = PhotoRangeSelection()
+        selection.select(identifiers[8_000], orderedIdentifiers: identifiers)
+        XCTAssertNotNil(selection.anchor)
+        XCTAssertEqual(selection.selected.count, 1)
+        selection.select(identifiers[10], orderedIdentifiers: identifiers)
+        XCTAssertNil(selection.anchor)
+        XCTAssertEqual(selection.selected.count, 7_991)
+        XCTAssertTrue(selection.selected.contains(identifiers[5_000]))
+        XCTAssertFalse(selection.selected.contains(identifiers[9]))
+        selection.deselect(identifiers[5_000])
+        XCTAssertEqual(selection.selected.count, 7_990)
+        selection.select(identifiers[7_999], orderedIdentifiers: identifiers)
+        selection.select(identifiers[9_999], orderedIdentifiers: identifiers)
+        XCTAssertEqual(selection.selected.count, 9_989)
     }
 
     func testLivePhotoCloudHalfIsNotCompleteAndResumeSkipsCompletedHalf() async throws {
@@ -112,7 +354,7 @@ final class BackupTests: XCTestCase {
             case .prepared, .dataWritten: XCTAssertEqual(plan.pending.count, 1)
             case .verified, .promoted, .recorded: XCTAssertEqual(plan.completed, 1)
             }
-            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: store.root.appendingPathComponent("transactions").path).isEmpty)
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: store.root.appendingPathComponent(".luna-sync/transactions").path).isEmpty)
         }
     }
 
@@ -143,7 +385,7 @@ final class BackupTests: XCTestCase {
 
     func testCorruptTransactionBlocksWritingAndIsPreserved() throws {
         let (store, _) = try makeStore()
-        let path = try store.safeURL("transactions/broken.json")
+        let path = try store.safeURL(".luna-sync/transactions/broken.json")
         try Data("{".utf8).write(to: path)
         XCTAssertThrowsError(try store.recover())
         XCTAssertTrue(FileManager.default.fileExists(atPath: path.path))
@@ -191,6 +433,14 @@ final class BackupTests: XCTestCase {
         source.chunkDelay = 0
         try await run(coordinator, sourceID: sourceID)
         XCTAssertEqual(try store.plan(assets: [asset], sourceID: sourceID).completed, 1)
+        // Background expiration uses this same cancellation path. A resumed Live
+        // Photo must contain both complete originals, never the interrupted bytes.
+        let generation = try XCTUnwrap(store.record(for: asset, sourceID: sourceID)?.generations.first)
+        for resource in asset.resources {
+            let receipt = try XCTUnwrap(generation.resources[resource.key])
+            XCTAssertEqual(try Data(contentsOf: store.safeURL(receipt.relativePath)), FakeSource.content(asset, resource))
+        }
+        XCTAssertTrue(try store.verify().issues.isEmpty)
     }
 
     func testPathsRejectTraversalAndSymlinkEscape() throws {
@@ -206,7 +456,7 @@ final class BackupTests: XCTestCase {
     func testFutureFormatIsRejectedWithoutWriting() throws {
         let (store, _) = try makeStore()
         var metadata = store.metadata; metadata.formatVersion = 99
-        let data = try JSONEncoder().encode(metadata), marker = store.root.appendingPathComponent("archive.json")
+        let data = try JSONEncoder().encode(metadata), marker = store.markerURL
         try data.write(to: marker)
         XCTAssertThrowsError(try ArchiveStore(root: store.root))
         XCTAssertEqual(try Data(contentsOf: marker), data)
@@ -216,7 +466,7 @@ final class BackupTests: XCTestCase {
         let (store, sourceID) = try makeStore(), asset = asset()
         try commit(store, asset, sourceID, asset.resources[0])
         let key = asset.key(sourceID: sourceID)
-        try Data("{".utf8).write(to: store.safeURL("records/\(key.prefix(2))/\(key).json"))
+        try Data("{".utf8).write(to: store.safeURL(".luna-sync/records/\(key.prefix(2))/\(key).json"))
         let plan = try store.plan(assets: [asset, self.asset("healthy")], sourceID: sourceID)
         XCTAssertEqual(plan.completed, 0)
         XCTAssertEqual(plan.needsReview.count, 1)

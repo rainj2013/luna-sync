@@ -9,7 +9,7 @@ public final class ResourceSink: @unchecked Sendable {
     private var count: UInt64 = 0
     public init(url: URL) throws {
         guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
-            throw BackupFailure.destinationUnavailable("无法创建临时文件")
+            throw BackupFailure.destinationUnavailable(BackupCopy.tr("diagnostic.6d5b97d0"))
         }
         handle = try FileHandle(forWritingTo: url)
     }

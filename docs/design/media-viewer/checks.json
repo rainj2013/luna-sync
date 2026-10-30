@@ -1,0 +1,14 @@
+{
+  "checks" : [
+    "bounded decoding",
+    "EXIF orientation",
+    "metadata dimensions",
+    "missing-file handling",
+    "image centering",
+    "zoom and pan",
+    "paging restored after zoom",
+    "image released on leave",
+    "original bytes unchanged"
+  ],
+  "passed" : true
+}

@@ -12,12 +12,25 @@ struct LunaSyncApp: App {
             ContentView(model: model)
                 .task { await model.restore() }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .background && model.busy {
+                    #if DEBUG
+                    BackgroundBackupProbe.shared.sceneChanged(phase)
+                    #endif
+                    if phase == .background {
+                        model.enteredBackground()
+                    } else if phase == .active {
+                        model.enteredForeground()
+                        model.refreshAuthorization()
+                    }
+                    // Integrity checks retain the existing short cleanup window.
+                    if phase == .background && model.busy && model.isVerifying {
                         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Finish resource IO") {
                             Task { @MainActor in model.pause(); endBackgroundTask() }
                         }
                         model.pause()
-                    } else if phase == .active { model.refreshAuthorization() }
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataWillBecomeUnavailableNotification)) { _ in
+                    model.protectedDataBecameUnavailable()
                 }
                 .onChange(of: model.busy) { _, busy in if !busy { endBackgroundTask() } }
         }

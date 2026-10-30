@@ -14,7 +14,7 @@ App → LunaSyncPhotoKit → LunaSyncCore。核心仅依赖 Foundation；Apple �
 
 资产指纹由原始资源描述、拍摄时间、媒体类型、尺寸、时长及本地标识计算，不包含 `modificationDate`。这避免仅调色就重新备份；同标识且所有描述不变的内容变化不能靠元数据快速扫描检测。完整校验检测的是硬盘文件与既有导出值的差异，不重新读取照片库原片。
 
-## 格式 v1
+## 格式 v2 与旧版兼容
 
 JSON 使用 sortedKeys 和 Foundation Codable 默认日期编码（相对 2001-01-01 的秒）。UUID 由 Codable 编码；生成路径时使用小写 UUID。资产键为 `SHA256(lowercase(sourceUUID) + "\n" + localIdentifier)`。
 
@@ -23,7 +23,9 @@ JSON 使用 sortedKeys 和 Foundation Codable 默认日期编码（相对 2001-0
 - 原始资源描述变化会建立新 generation，旧文件和记录保留。每代保存 `id`、完整资产描述及按 resource key 索引的资源收据。
 - 收据包含资源描述、档案内相对路径、实际字节数、SHA-256 和完成时间。
 - 每次传输使用唯一目标路径，校验错误或重新导出均不覆盖旧文件。
-- 格式版本不等于 1 时禁止写入，不尝试猜测兼容性。
+- 新档案格式为 v2，原片直接放在用户所选目录，元数据和临时文件集中于 `.luna-sync`。已有照片允许保留，同名文件永不覆盖。
+- 兼容 v1 的根目录档案头、records/transactions 和 originals 内收据；读取不搬动旧照片。首次写入平铺新资源前升级档案头到 v2，使旧 App 拒绝不认识的布局。
+- 不接受 1、2 之外的格式版本。隐藏元数据目录不能被原片路径覆盖，事务临时路径必须是私有 staging 路径，或旧版 originals 内的 `.partial` 路径。
 
 元数据通过同目录临时文件写入、同步、POSIX rename 和读回比对提交。记录成功后才通知 UI。路径拒绝绝对路径、空片段、`..`、反斜杠和逃出档案根的符号链接。目录遍历失败不得解释成空档案。
 

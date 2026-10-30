@@ -14,22 +14,41 @@ public actor BackupCoordinator {
     public func records() throws -> [AssetRecord] { try store.records() }
     public func snapshot() throws -> ArchiveSnapshot { try store.snapshot() }
 
+    /// Reads metadata and checks recorded files without exporting original media.
+    public func preview(sourceID: UUID, includeVideos: Bool, selection: BackupSelection = .all,
+                        requireAssociationCheck: Bool = false) async throws -> BackupPreview {
+        guard !running else { throw BackupFailure.unavailable(BackupCopy.tr("diagnostic.5ae7cc7b")) }
+        running = true; defer { running = false }
+        let assets = try await source.scan(includeVideos: includeVideos, selection: requireAssociationCheck ? .all : selection)
+        try Task.checkCancellation()
+        if requireAssociationCheck { try store.validateAssociation(assets: assets, sourceID: sourceID) }
+        let selected = assets.filter(selection.includes)
+        let plan = try store.plan(assets: selected, sourceID: sourceID)
+        return BackupPreview(total: selected.count, completed: plan.completed,
+                             photoCount: plan.pending.filter { $0.mediaType == 1 }.count,
+                             videoCount: plan.pending.filter { $0.mediaType == 2 }.count,
+                             pendingIdentifiers: plan.pending.map(\.localIdentifier), issues: plan.needsReview)
+    }
+
     public func run(sourceID: UUID, includeVideos: Bool, allowNetwork: Bool, requireAssociationCheck: Bool,
+                    selection: BackupSelection = .all,
                     events: @escaping @Sendable (BackupEvent) -> Void) async throws {
-        guard !running else { throw BackupFailure.unavailable("已有任务正在运行。") }
+        guard !running else { throw BackupFailure.unavailable(BackupCopy.tr("diagnostic.5ae7cc7b")) }
         running = true; defer { running = false }
         do {
             try Task.checkCancellation()
             for warning in try store.recover() { events(.recoveryWarning(warning)) }
             events(.scanning)
-            let assets = try await source.scan(includeVideos: includeVideos)
+            let checkAssociation = requireAssociationCheck && !associationChecked.contains(sourceID)
+            let assets = try await source.scan(includeVideos: includeVideos, selection: checkAssociation ? .all : selection)
             try Task.checkCancellation()
-            if requireAssociationCheck && !associationChecked.contains(sourceID) {
+            if checkAssociation {
                 try store.validateAssociation(assets: assets, sourceID: sourceID)
                 associationChecked.insert(sourceID)
             }
-            let plan = try store.plan(assets: assets, sourceID: sourceID)
-            events(.planned(total: assets.count, completed: plan.completed))
+            let selectedAssets = assets.filter(selection.includes)
+            let plan = try store.plan(assets: selectedAssets, sourceID: sourceID)
+            events(.planned(total: selectedAssets.count, completed: plan.completed))
             for (id, issue) in plan.needsReview { events(.failed(assetID: id, message: issue, cloudOnly: false)) }
             for asset in plan.pending {
                 try Task.checkCancellation()
@@ -78,7 +97,7 @@ public actor BackupCoordinator {
     }
 
     public func verify(progress: @escaping @Sendable (Int) -> Void) throws -> VerificationResult {
-        guard !running else { throw BackupFailure.unavailable("请先暂停备份。") }
+        guard !running else { throw BackupFailure.unavailable(BackupCopy.tr("diagnostic.cf3f5122")) }
         running = true; defer { running = false }
         _ = try store.recover()
         return try store.verify(cancelled: { Task.isCancelled }, progress: progress)
