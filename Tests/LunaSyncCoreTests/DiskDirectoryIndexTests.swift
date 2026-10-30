@@ -91,6 +91,20 @@ final class DiskDirectoryIndexTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: hidden), Data([1]))
     }
 
+    func testDeleteAcceptsParentWithEitherDirectoryHint() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for isDirectory in [false, true] {
+            let parent = URL(fileURLWithPath: root.path, isDirectory: isDirectory)
+            let photo = root.appendingPathComponent("photo.jpg")
+            try Data([1]).write(to: photo)
+            try DiskDirectoryIndex.delete(photo, in: parent)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: photo.path))
+            XCTAssertThrowsError(try DiskDirectoryIndex.delete(root, in: parent))
+        }
+    }
+
     func testDeleteSymlinkDoesNotDeleteItsDestination() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let outside = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

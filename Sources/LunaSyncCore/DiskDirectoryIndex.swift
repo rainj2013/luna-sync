@@ -63,7 +63,8 @@ public struct DiskDirectoryIndex: Sendable {
         let parent = directory.standardizedFileURL
         let child = target.standardizedFileURL
         guard child.isFileURL, parent.isFileURL,
-              child != parent, child.deletingLastPathComponent() == parent,
+              child.pathComponents != parent.pathComponents,
+              child.deletingLastPathComponent().pathComponents == parent.pathComponents,
               !child.lastPathComponent.hasPrefix(".") else {
             throw BackupFailure.unsafePath
         }
