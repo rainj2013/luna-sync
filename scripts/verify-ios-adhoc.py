@@ -13,8 +13,8 @@ if info.get("CFBundleIdentifier") != expected["bundleID"]:
     raise SystemExit("Exported app bundle ID does not match")
 if info.get("CFBundleSupportedPlatforms") != ["iPhoneOS"]:
     raise SystemExit("Expected a device build, not a simulator build")
-if info.get("CFBundleDisplayName") != "相存家庭版":
-    raise SystemExit("Family installation must have a distinct display name")
+if info.get("CFBundleDisplayName") != "相存":
+    raise SystemExit("Expected the app display name 相存")
 result = subprocess.run(["codesign", "-d", "--entitlements", ":-", str(app)], capture_output=True, check=True)
 entitlements = plistlib.loads(result.stdout)
 if entitlements.get("get-task-allow") is not False:

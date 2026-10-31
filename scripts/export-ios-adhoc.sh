@@ -7,8 +7,6 @@ fail() { echo "::error::$*" >&2; exit 1; }
 [[ $# -eq 1 && -d "$1" ]] || fail 'Usage: export-ios-adhoc.sh <unsigned.xcarchive>'
 archive=$1
 script_dir=$(cd "$(dirname "$0")" && pwd)
-# The family variant installs beside the developer build with a distinct label.
-/usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName 相存家庭版' "$archive/Products/Applications/LunaSync.app/Info.plist"
 for name in RUNNER_TEMP APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_PROVISIONING_PROFILE APPLE_SIGNING_IDENTITY APPLE_TEAM_ID IOS_BUNDLE_ID; do
   [[ -n "${!name:-}" ]] || fail "Missing signing variable: $name"
 done
@@ -70,6 +68,6 @@ grep -Fx -- "Authority=$APPLE_SIGNING_IDENTITY" <<< "$details" >/dev/null || fai
 cmp -s "$work/profile.mobileprovision" "$app/embedded.mobileprovision" || fail 'Exported app uses a different profile.'
 python3 "$script_dir/verify-ios-adhoc.py" "$app" "$work/distribution-info.json"
 mkdir -p release-assets
-cp "${ipas[0]}" release-assets/LunaSync-family.ipa
+cp "${ipas[0]}" release-assets/LunaSync.ipa
 cp "$work/distribution-info.json" release-assets/distribution-info.json
 echo 'Ad Hoc IPA verified. Download it only from this private repository.'
