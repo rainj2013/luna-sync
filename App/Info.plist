@@ -12,7 +12,7 @@
     <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
     <key>NSPhotoLibraryUsageDescription</key><string>Read original photos and videos to back them up to the drive folder you choose.</string>
     <key>UIBackgroundModes</key><array><string>processing</string></array>
-    <key>BGTaskSchedulerPermittedIdentifiers</key><array><string>dev.lunasync.app.backup.*</string></array>
+    <key>BGTaskSchedulerPermittedIdentifiers</key><array><string>$(PRODUCT_BUNDLE_IDENTIFIER).backup.*</string></array>
     <key>NSPhotoLibraryAddUsageDescription</key><string>Save the original photo or video you choose from your drive to Photos.</string>
     <key>UILaunchScreen</key><dict/>
     <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>

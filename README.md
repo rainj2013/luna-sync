@@ -33,6 +33,8 @@ xcodebuild -project LunaSync.xcodeproj -scheme LunaSync \
 
 ## 核心测试
 
+仅供家庭设备使用的签名安装包，可通过独立的 **Build Ad Hoc IPA** GitHub Actions 工作流生成。设备登记、下载、安装及续签方法见 [家庭设备安装](docs/ad-hoc-distribution.md)。
+
 在 Linux 或 Mac 安装 Swift 5.9 以上版本，然后运行：
 
 ```bash

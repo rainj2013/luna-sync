@@ -25,7 +25,8 @@ final class BackgroundBackupSession {
     func begin(work: @escaping () -> Void, pause: @escaping () -> Void,
                stateChanged: @escaping (State) -> Void) {
         precondition(identifier == nil)
-        let identifier = "dev.lunasync.app.backup.\(UUID().uuidString)"
+        let bundleID = Bundle.main.bundleIdentifier ?? "dev.lunasync.app"
+        let identifier = "\(bundleID).backup.\(UUID().uuidString)"
         self.identifier = identifier
         pendingWork = work; pauseWork = pause; self.stateChanged = stateChanged
         completed = 0; total = 0; lastUpdate = .distantPast

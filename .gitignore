@@ -6,3 +6,10 @@ xcuserdata/
 .DS_Store
 *.ipa
 *.xcarchive
+*.p8
+*.p12
+*.pfx
+*.key.pem
+*.mobileprovision
+__pycache__/
+release-assets/

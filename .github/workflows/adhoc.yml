@@ -1,0 +1,67 @@
+name: Build Ad Hoc IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-adhoc
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Signed family IPA
+    if: github.ref == 'refs/heads/master' && github.event.repository.private
+    runs-on: macos-15
+    timeout-minutes: 60
+    environment: ios-adhoc
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      APPLE_TEAM_ID: 9Q75CFWM2V
+      IOS_BUNDLE_ID: dev.lunasync.family
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Show toolchain
+        run: xcodebuild -version
+      - name: Check Ad Hoc profile validation
+        run: python3 -m unittest discover -s Tests -p 'test_ios_adhoc*.py'
+      - name: Core tests
+        run: swift test
+      - name: Check localization
+        run: swift scripts/check-localization.swift
+      - name: Archive application without signing credentials
+        run: |
+          xcodebuild -project LunaSync.xcodeproj -scheme LunaSync \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/LunaSync.xcarchive" -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT" archive
+      - name: Sign and export Ad Hoc IPA
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: bash scripts/export-ios-adhoc.sh "$RUNNER_TEMP/LunaSync.xcarchive"
+      - name: Clean up temporary signing material
+        if: always()
+        run: |
+          for directory in "$RUNNER_TEMP"/luna-ios-signing.*; do
+            [[ -d "$directory" ]] || continue
+            security delete-keychain "$directory/signing.keychain-db" 2>/dev/null || true
+            rm -rf "$directory"
+          done
+      - name: Upload private installation package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: LunaSync-family-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            release-assets/LunaSync-family.ipa
+            release-assets/distribution-info.json
+          if-no-files-found: error
+          retention-days: 14
