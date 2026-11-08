@@ -10,9 +10,7 @@
   </p>
   <p>
     <a href="#开始使用">开始使用</a> ·
-    <a href="docs/DEVELOPMENT.md">构建与安装</a> ·
-    <a href="docs/DATA_AND_RECOVERY.md">数据与恢复</a> ·
-    <a href="https://github.com/rainj2013/luna-sync/issues">反馈问题</a>
+    <a href="docs/DEVELOPMENT.md">构建与安装</a>
   </p>
 </div>
 
