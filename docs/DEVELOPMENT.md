@@ -1,23 +1,19 @@
 # 开发、构建与安装
 
-[返回项目首页](../README.md)
+[返回项目首页](../README.md) · [数据与恢复](DATA_AND_RECOVERY.md)
 
-## 在 Mac 构建和安装
+## 构建与安装
 
-当前配置使用 Xcode 26、iOS 18 或更新的 iPhone，以及在系统“文件”App 中可访问的外接硬盘。照片选择使用 `Vendor/ZLPhotoBrowser` 中基于 5.0.0 的本地包，补充实时区间选择刷新接口；无需下载远端依赖。
+需要 Mac、Xcode 26.3、iOS 18+ 的 iPhone，以及能在系统“文件”App 中访问的外置存储。
 
 1. 打开 `LunaSync.xcodeproj`，选择 **LunaSync** scheme。
-2. 在目标的 **Signing & Capabilities** 中选择自己的 Team，并将 Bundle Identifier 改成自己可用的标识。
-3. 连接 iPhone，启用系统要求的开发者模式，选择真机后运行。个人免费签名的有效期及能力限制由 Apple 决定。
-4. 在 App 允许照片权限，连接硬盘，选择最终要存放照片的目录。照片直接写入此目录，不会自动建立 LunaSync、originals 或年月子目录；记录与临时进度集中在 `.luna-sync` 隐藏目录。
-5. 选择照片范围后扫描确认，再开始备份。首尾选择在第二次点选后立即勾选整段，完成按钮显示真实数量；可以继续取消个别照片或追加其他区间。视频开关与 iCloud 下载策略在设置中。建议保持 App 在前台；iOS 26 可请求后台继续处理，能否继续由系统决定，旧系统或请求被拒绝时会在有限收尾时间后暂停。
-6. “文件”是与备份目录完全独立的文件浏览器。首次单独选择移动硬盘根目录后，可以逐层浏览文件夹并预览文件；授权会被记住，预览页可左右切换，并用“完成”关闭。
+2. 在 **Signing & Capabilities** 中选择自己的 Team，将 Bundle Identifier 改成自己可用的标识。
+3. 连接 iPhone，按系统提示开启开发者模式，选择真机运行。
+4. 允许照片权限，连接硬盘，选择备份目录和照片范围，扫描确认后开始备份。
 
-默认只读取本地原片。云端资源会列为需下载，不会被记作成功；在设置中开启“允许从 iCloud 下载原片”后重试。下载由 PhotoKit 与自己的 iCloud 完成，可能产生网络流量。
+照片选择依赖已放在 `Vendor/ZLPhotoBrowser`，无需拉取远端依赖。个人签名的有效期和能力限制由 Apple 决定。
 
-允许有限照片权限时，备份仅覆盖授权范围，界面会持续提示。扫描请求包含连拍和隐藏资产；系统最终可返回的范围仍由权限和系统行为决定。
-
-无签名构建：
+无签名模拟器构建：
 
 ```bash
 xcodebuild -project LunaSync.xcodeproj -scheme LunaSync \
@@ -25,31 +21,41 @@ xcodebuild -project LunaSync.xcodeproj -scheme LunaSync \
   -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build
 ```
 
-## 安装包与持续集成
+## 检查与持续集成
 
-本仓库目前公开源码和无签名构建产物，不提供通用的已签名安装包。原 **Build Ad Hoc IPA** 工作流仅允许私有仓库运行，在当前公开仓库中会跳过；私有分发环境的设备登记、签名和续签方法见 [指定设备安装](ad-hoc-distribution.md)。
-
-GitHub Actions 使用 macOS 和 Xcode 26.3，执行核心测试、多语言检查和 iOS 模拟器/真机 Release 无签名构建，支持推送、PR 和手动运行。在成功运行的 **Artifacts** 中下载 `LunaSync-<commit SHA>`，其中包含模拟器 App ZIP 和 `LunaSync-unsigned.ipa`。无签名 IPA 需要自行签名后才能安装到 iPhone；此流程不执行 TestFlight 或 App Store 发布。产物保留 14 天，仅上传到 Actions，不提交到 Git 仓库。
-
-## 核心测试
-
-在 Linux 或 Mac 安装 Swift 5.9 以上版本，然后运行：
+Swift 5.9+ 可运行核心测试；多语言检查在 Mac 开发环境执行：
 
 ```bash
 swift test
+swift scripts/check-localization.swift
 ```
 
-测试使用模拟照片库及临时目录，覆盖增量识别、Live Photo 半完成、RAW+JPEG、取消、五个提交中断点、同大小内容损坏、文件缺失、目录穿越和符号链接、照片库重新关联、版本兼容与万张资产规划。它们不能替代真实 iPhone、PhotoKit 和外接硬盘验证。
+GitHub Actions 使用 macOS 和 Xcode 26.3，执行核心测试、多语言检查，以及模拟器和真机的 Release 无签名构建。成功运行的 Artifacts 中提供模拟器 App ZIP 和无签名 IPA，保留 14 天；IPA 需要自行签名才能安装。当前没有 App Store 或 TestFlight 公开安装入口。
 
-## 项目结构
+原 Ad Hoc 工作流仅允许私有仓库运行，在本公开仓库中会跳过。若在私有分发环境使用，需要自己的分发证书、已登记设备的描述文件，以及 `ios-adhoc` 环境中的 `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_PROVISIONING_PROFILE` 和 `APPLE_SIGNING_IDENTITY`。安装包内嵌设备信息，不要公开上传；签名材料应保存在仓库之外或 Secrets 中。
 
-- `Sources/LunaSyncCore`：模型、流式哈希、规划、档案读写、事务恢复和任务协调。
-- `Sources/LunaSyncPhotoKit`：iOS 原始资源读取、目录授权、本机 SQLite。
-- `App/ContentView.swift`：概览、扫描确认、任务进度、历史与设置。
-- `App/DesignSystem.swift`：设计色、排版组件、按钮与真实照片缩略图。
-- `App/PhotoScopeView.swift`、`App/FilesView.swift`：照片范围与独立硬盘浏览。
-- `App/Localizable.xcstrings`、`App/InfoPlist.xcstrings`：中英文界面与权限文案。
-- `Tests/LunaSyncCoreTests`：可在 Linux 和 Mac 运行的核心测试。
-- [设计与存储约定](architecture.md)、[真机验收清单](device-validation.md)。
+## 项目结构与维护
 
-Linux 可以运行核心测试；Apple SDK 适配层和 iOS App 需要在 Mac 上构建。实际 iPhone 与外接硬盘验证见真机验收清单。
+- `Sources/LunaSyncCore`：备份规划、流式哈希、档案读写、事务恢复与任务协调。
+- `Sources/LunaSyncPhotoKit`：PhotoKit 原始资源读取、目录授权、本机 SQLite 缓存。
+- `App/`：SwiftUI 界面、照片范围选择、文件浏览与媒体预览。
+- `Tests/LunaSyncCoreTests`：核心测试，可在 Linux 和 Mac 运行。
+- `App/AppIcon.icon/`：生产图标的 Icon Composer 源文件；README 的 PNG 仅用于展示。
+
+依赖方向为 App → LunaSyncPhotoKit → LunaSyncCore。备份协调器串行管理单个档案任务，资源分块写入并流式计算哈希，不将整段视频载入内存。文件浏览在后台读取和索引目录，只加载可见项，限制图片解码并发和内存缓存，不写入外置存储缩略图缓存。
+
+中英文界面文案分别维护在 `App/Localizable.xcstrings` 和 `App/InfoPlist.xcstrings`；引擎诊断在 `Sources/LunaSyncCore/Resources/{en,zh-Hans}.lproj/Localizable.strings`。修改时保留资源标识和格式化参数，两种语言同步更新，并运行多语言检查。流程判断使用结构化状态，不依赖显示文案。
+
+## 真机检查
+
+使用测试照片和独立备份目录验证以下行为，记录设备、系统、硬盘、连接线和测试结果：
+
+- **权限与连接**：完整、有限、拒绝照片权限；目录重选、失效书签、拔盘重连、只读盘与空间不足。
+- **原始资源**：HEIC/JPEG、RAW+JPEG、Live Photo、大视频、编辑过的照片；iCloud 下载开启、关闭及断网时没有假成功。
+- **完整性与恢复**：写入或校验时拔盘、强退和后台暂停；已完成文件不重传，未完成文件从头重传；文件缺失、同大小损坏、损坏记录均能正确处理。
+- **增量与重装**：重复备份跳过已完成项；新增照片被发现，手机删图不删除硬盘备份；重装后显式关联原照片库。
+- **选择与浏览**：日期草稿取消不提交，首尾选择数量与编号一致；大量文件下搜索、排序、滚动和预览可响应，外置盘不新增缩略图缓存。
+- **媒体操作**：图片缩放与翻页、视频播放、信息、分享、保存回相册；删除需确认，取消或失败不误报成功。
+- **界面与后台**：小屏、辅助功能字号、中英文、VoiceOver；iOS 26 后台继续处理获准与拒绝两条路径，旧系统暂停后可恢复。
+
+核心测试和模拟器截图不能替代真实 iPhone、PhotoKit 与外置硬盘验证，也不能作为真实硬盘吞吐量的结论。

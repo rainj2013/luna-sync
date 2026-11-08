@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/design/app-icon/default.png" width="96" alt="Luna Sync icon">
+  <img src="assets/icon.png" width="96" alt="Luna Sync icon">
   <h1>Luna Sync · 相存</h1>
   <p>Back up original iPhone photos and videos directly to your own drive.</p>
   <p>
@@ -22,8 +22,8 @@ Luna Sync is a local iPhone photo backup app. Connect an external drive, choose 
 ## Original files, incremental backups
 
 <p align="center">
-  <img src="docs/design/editable-ui/native/02-home-ready.png" width="280" alt="Backup overview">
-  <img src="docs/design/editable-ui/native/05-review.png" width="280" alt="Review scanned items before backup">
+  <img src="assets/screenshots/overview.png" width="280" alt="Backup overview">
+  <img src="assets/screenshots/review.png" width="280" alt="Review scanned items before backup">
 </p>
 
 <p align="center"><sub>Simulator screenshots with sample photos and storage figures.</sub></p>
@@ -58,8 +58,6 @@ The detailed guides below are currently in Chinese.
 
 - [Development, build & install](docs/DEVELOPMENT.md)
 - [Data layout, verification & recovery](docs/DATA_AND_RECOVERY.md)
-- [Architecture](docs/architecture.md) · [Device validation](docs/device-validation.md)
-- [Copy & localization](docs/copy-and-localization.md) · [Large-library performance](docs/large-library-performance.md)
 
 ## Acknowledgments
 

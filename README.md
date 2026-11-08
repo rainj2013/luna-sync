@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/design/app-icon/default.png" width="96" alt="相存图标">
+  <img src="assets/icon.png" width="96" alt="相存图标">
   <h1>Luna Sync · 相存</h1>
   <p>把 iPhone 里的照片和视频，直接备份到自己的硬盘。</p>
   <p>
@@ -22,8 +22,8 @@ Luna Sync 是一个纯本地的 iPhone 照片备份工具。接上外置存储�
 ## 原片备份，增量继续
 
 <p align="center">
-  <img src="docs/design/editable-ui/native/02-home-ready.png" width="280" alt="相存备份概览">
-  <img src="docs/design/editable-ui/native/05-review.png" width="280" alt="扫描后确认本次备份内容">
+  <img src="assets/screenshots/overview.png" width="280" alt="相存备份概览">
+  <img src="assets/screenshots/review.png" width="280" alt="扫描后确认本次备份内容">
 </p>
 
 <p align="center"><sub>模拟器截图，照片与容量数据仅用于展示。</sub></p>
@@ -56,8 +56,6 @@ Luna Sync 是一个纯本地的 iPhone 照片备份工具。接上外置存储�
 
 - [开发、构建与安装](docs/DEVELOPMENT.md)
 - [数据布局、校验与恢复](docs/DATA_AND_RECOVERY.md)
-- [架构约定](docs/architecture.md) · [真机验收](docs/device-validation.md)
-- [文案与多语言](docs/copy-and-localization.md) · [大照片库性能](docs/large-library-performance.md)
 
 ## 致谢
 
