@@ -1,73 +1,64 @@
-# Luna Sync
+<div align="center">
+  <img src="docs/design/app-icon/default.png" width="96" alt="相存图标">
+  <h1>Luna Sync · 相存</h1>
+  <p>把 iPhone 里的照片和视频，直接备份到自己的硬盘。</p>
+  <p>
+    <a href="https://github.com/rainj2013/luna-sync/actions/workflows/ci.yml"><img src="https://github.com/rainj2013/luna-sync/actions/workflows/ci.yml/badge.svg" alt="构建与测试"></a>
+    <img src="https://img.shields.io/badge/platform-iOS%2018%2B-5b8def?style=flat-square" alt="iOS 18 及以上">
+    <img src="https://img.shields.io/badge/Swift-SwiftUI%20%2B%20PhotoKit-a26043?style=flat-square" alt="SwiftUI 与 PhotoKit">
+  </p>
+  <p>
+    <a href="#开始使用">开始使用</a> ·
+    <a href="docs/DEVELOPMENT.md">构建与安装</a> ·
+    <a href="docs/DATA_AND_RECOVERY.md">数据与恢复</a> ·
+    <a href="https://github.com/rainj2013/luna-sync/issues">反馈问题</a>
+  </p>
+</div>
 
-iPhone 外接硬盘增量备份工具。SwiftUI + PhotoKit，最低 iOS 18，不需要账号或服务端。照片范围选择使用 ZLPhotoBrowser 5.x。
+<div align="center"><a href="README.en.md">English</a> · 简体中文</div>
 
-提供原始照片、视频、RAW/JPEG、Live Photo 配套资源备份；每资源写入后读回 SHA-256 校验，保存硬盘记录，支持暂停、重试及重新连接后恢复。可按今天、最近 7 天、最近 30 天、今年或自定义日期范围做增量备份，也可逐张/滑动多选，或选择首尾两张选中整段照片。保存原始格式，不包含裁剪、调色结果和编辑历史。不会删除手机照片或跟随照片库删除硬盘文件。
+Luna Sync 是一个纯本地的 iPhone 照片备份工具。接上外置存储，选择目录和照片范围，就能把原始文件直接备份过去；下次连接时跳过已完成的内容，继续处理新增和未完成的照片。无需账号，也不需要配套服务端。
 
-界面按 Luna-Sync-Design-Handoff 重建为 `概览 / 记录 / 文件` 三个一级模块，设置从概览右上角进入。备份流程为“选择备份目录 → 选择照片范围 → 扫描预览 → 确认备份”，并提供独立的进度、暂停、完成与异常页面。`文件` 是与备份目录无关的通用硬盘浏览器，支持三列网格、列表、图片/视频筛选、搜索、排序和原文件预览。详见 [设计实施说明](docs/design-handoff-implementation.md)。
+## 原片备份，增量继续
 
-界面、权限说明与备份诊断均已抽离为固定标识的中英文资源，支持跟随系统语言和集中修改措辞。后续文案优化可直接修改 String Catalog 和引擎的 `.strings`，不需要改页面逻辑。详见 [文案与多语言](docs/copy-and-localization.md)。
+<p align="center">
+  <img src="docs/design/editable-ui/native/02-home-ready.png" width="280" alt="相存备份概览">
+  <img src="docs/design/editable-ui/native/05-review.png" width="280" alt="扫描后确认本次备份内容">
+</p>
 
-## 在 Mac 构建和安装
+<p align="center"><sub>模拟器截图，照片与容量数据仅用于展示。</sub></p>
 
-当前配置使用 Xcode 26、iOS 18 或更新的 iPhone，以及在系统“文件”App 中可访问的外接硬盘。照片选择使用 `Vendor/ZLPhotoBrowser` 中基于 5.0.0 的本地包，补充实时区间选择刷新接口；无需下载远端依赖。
+- **保留原片**：支持照片、视频、RAW/JPEG 和 Live Photo 配套资源，保留原始格式与文件名，同名时自动加序号。
+- **按范围备份**：全部照片、日期范围，或逐张、滑动、首尾区间选择。
+- **中断后继续**：保留已完成内容，重新连接原目录后继续；未完成的单个文件从头重传。
+- **写完再确认**：每个资源写入后读回，通过 SHA-256 校验才提交完成记录；Live Photo 全部资源完成才算成功。
+- **备份独立保留**：不会删除手机照片，也不会跟随相册删除硬盘上的文件。
 
-1. 打开 `LunaSync.xcodeproj`，选择 **LunaSync** scheme。
-2. 在目标的 **Signing & Capabilities** 中选择自己的 Team，并将 Bundle Identifier 改成自己可用的标识。
-3. 连接 iPhone，启用系统要求的开发者模式，选择真机后运行。个人免费签名的有效期及能力限制由 Apple 决定。
-4. 在 App 允许照片权限，连接硬盘，选择最终要存放照片的目录。照片直接写入此目录，不会自动建立 LunaSync、originals 或年月子目录；记录与临时进度集中在 `.luna-sync` 隐藏目录。
-5. 选择照片范围后扫描确认，再开始备份。首尾选择在第二次点选后立即勾选整段，完成按钮显示真实数量；可以继续取消个别照片或追加其他区间。视频开关与 iCloud 下载策略在设置中。保持 App 在前台；离开 App 会暂停，返回后手动继续。
-6. “文件”是与备份目录完全独立的文件浏览器。首次单独选择移动硬盘根目录后，可以逐层浏览文件夹并预览文件；授权会被记住，预览页可左右切换，并用“完成”关闭。
+## 顺便浏览硬盘
 
-默认只读取本地原片。云端资源会列为需下载，不会被记作成功；在设置中开启“允许从 iCloud 下载原片”后重试。下载由 PhotoKit 与自己的 iCloud 完成，可能产生网络流量。
+独立的文件浏览器支持逐层浏览目录、网格与列表、搜索、排序、图片与视频筛选，以及原文件预览和左右切换。
 
-允许有限照片权限时，备份仅覆盖授权范围，界面会持续提示。扫描请求包含连拍和隐藏资产；系统最终可返回的范围仍由权限和系统行为决定。
+浏览时按需加载，在内存中保留有限的预览，不向外置存储写入缩略图缓存。备份记录和临时进度集中保存在同步目录下的 `.luna-sync` 隐藏目录，照片仍是可以直接打开的普通文件。
 
-无签名构建：
+## 开始使用
 
-```bash
-xcodebuild -project LunaSync.xcodeproj -scheme LunaSync \
-  -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build
-```
+需要 **iOS 18+**，以及能被系统“文件”App 识别和访问的外置存储。当前没有 App Store 或 TestFlight 公开安装入口，可在 Mac 上使用 Xcode 自行构建，见[构建与安装](docs/DEVELOPMENT.md)。
 
-## 核心测试
+1. 连接外置存储，允许照片权限，选择备份目录。
+2. 选择照片范围，扫描并确认本次需要备份的内容。
+3. 开始备份，完成后查看结果；下次选择同一个目录继续。
 
-供已登记设备使用的签名安装包，可通过 **Build Ad Hoc IPA** GitHub Actions 工作流生成。设备登记、下载、安装及续签方法见 [指定设备安装](docs/ad-hoc-distribution.md)。
+默认只读取本地原片；需要备份仅在 iCloud 上的内容时，可在设置中允许下载原片。建议保持 App 在前台，后台能否继续由系统决定。备份保留原始资源，不包含照片 App 的裁剪、调色结果和编辑历史。
 
-在 Linux 或 Mac 安装 Swift 5.9 以上版本，然后运行：
+## 开发与文档
 
-```bash
-swift test
-```
+界面使用 SwiftUI，照片读取使用 PhotoKit，照片选择基于 [ZLPhotoBrowser](https://github.com/longitachi/ZLPhotoBrowser)。备份引擎独立为 Swift 模块，可单独运行核心测试。
 
-测试使用模拟照片库及临时目录，覆盖增量识别、Live Photo 半完成、RAW+JPEG、取消、五个提交中断点、同大小内容损坏、文件缺失、目录穿越和符号链接、照片库重新关联、版本兼容与万张资产规划。它们不能替代真实 iPhone、PhotoKit 和外接硬盘验证。
+- [开发、构建与安装](docs/DEVELOPMENT.md)
+- [数据布局、校验与恢复](docs/DATA_AND_RECOVERY.md)
+- [架构约定](docs/architecture.md) · [真机验收](docs/device-validation.md)
+- [文案与多语言](docs/copy-and-localization.md) · [大照片库性能](docs/large-library-performance.md)
 
-GitHub Actions 仅使用 macOS 和 Xcode 26.3，执行核心测试、多语言检查和 iOS 模拟器/真机 Release 无签名构建，支持推送、PR 和手动运行。在成功运行的 **Artifacts** 中下载 `LunaSync-<commit SHA>`，其中包含模拟器 App ZIP 和 `LunaSync-unsigned.ipa`。无签名 IPA 需要自行签名后才能安装到 iPhone；此流程不执行 TestFlight 或 App Store 发布。产物保留 14 天，仅上传到 Actions，不提交到 Git 仓库。
+## 致谢
 
-## 数据与恢复
-
-新档案使用格式 v2：照片直接保存为所选目录中的原始文件名，只有同名冲突时添加 ` (2)` 等序号，绝不覆盖已有文件。`.luna-sync/archive.json` 标识档案；隐藏目录中的 `records` 保存资源记录，`transactions` 和 `staging` 保存恢复进度与临时内容。可选择已有其他照片的非空目录。
-
-旧版档案头与记录继续可读，既有文件不会自动移动。选择旧版档案根目录后，新增照片也直接写入这个根目录，原始相对路径的旧收据仍可验证和跳过。旧版曾自动创建的 LunaSync 子目录会在恢复时要求重新确认目的地。v1 档案首次写入平铺照片时升级到 v2，旧版 App 会拒绝写入该新格式。
-
-每个资源分块写入 `.partial`，在 PhotoKit 成功结束后读回校验。预期哈希先持久化到事务，再移为正式文件、提交资产记录；Live Photo 全部原始资源完成才计为一张成功。未完成文件从头重传，不做字节级续传。
-
-每轮快速检查已完成文件的存在性及大小；概览与设置中的完整校验会重新读取所有已记录文件，检查内容。校验不符会撤销该资源的完成记录，下次备份重传，异常文件留在硬盘上供检查。旧版本和遗留文件不会自动清理。
-
-手机 SQLite 为可重建缓存，不是成功依据。卸载 App 会丢失本机运行历史和目录授权，但硬盘资源记录仍保留。重新选择原目录、明确选择原照片库后，App 核对重叠资产标识和原始资源描述；无法核对时选择新来源。跨设备不自动去重，不承诺识别相同内容。损坏的单资产记录会保留并提示，健康资产可继续备份；损坏的档案头或事务会停止写入，避免错误恢复。
-
-备份为明文文件。SHA-256 检测内容差异，不证明原始照片在拍摄时没有损坏；exFAT 意外断电的持久性需要连接后重新检查，应用不承诺底层文件系统的原子事务。
-
-## 项目结构
-
-- `Sources/LunaSyncCore`：模型、流式哈希、规划、档案读写、事务恢复和任务协调。
-- `Sources/LunaSyncPhotoKit`：iOS 原始资源读取、目录授权、本机 SQLite。
-- `App/ContentView.swift`：概览、扫描确认、任务进度、历史与设置。
-- `App/DesignSystem.swift`：设计色、排版组件、按钮与真实照片缩略图。
-- `App/PhotoScopeView.swift`、`App/FilesView.swift`：照片范围与独立硬盘浏览。
-- `App/Localizable.xcstrings`、`App/InfoPlist.xcstrings`：中英文界面与权限文案。
-- `Tests/LunaSyncCoreTests`：可在 Linux 和 Mac 运行的核心测试。
-- [设计与存储约定](docs/architecture.md)、[真机验收清单](docs/device-validation.md)。
-
-Linux 可以运行核心测试；Apple SDK 适配层和 iOS App 需要在 Mac 上构建。实际 iPhone 与外接硬盘验证见真机验收清单。
+感谢 [ZLPhotoBrowser](https://github.com/longitachi/ZLPhotoBrowser) 及其作者和贡献者。项目使用的本地修改版保留了原 Apache 2.0 许可证，详见[第三方软件说明](THIRD_PARTY_NOTICES.md)。
