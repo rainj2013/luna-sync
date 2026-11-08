@@ -56,7 +56,6 @@ Built with SwiftUI and PhotoKit, with photo selection based on [ZLPhotoBrowser](
 The detailed guides below are currently in Chinese.
 
 - [Development, build & install](docs/DEVELOPMENT.md)
-- [Data layout, verification & recovery](docs/DATA_AND_RECOVERY.md)
 
 ## Acknowledgments
 

@@ -1,6 +1,6 @@
 # 开发、构建与安装
 
-[返回项目首页](../README.md) · [数据与恢复](DATA_AND_RECOVERY.md)
+[返回项目首页](../README.md)
 
 ## 构建与安装
 

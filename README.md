@@ -54,7 +54,6 @@ Luna Sync 是一个纯本地的 iPhone 照片备份工具。接上外置存储�
 界面使用 SwiftUI，照片读取使用 PhotoKit，照片选择基于 [ZLPhotoBrowser](https://github.com/longitachi/ZLPhotoBrowser)。备份引擎独立为 Swift 模块，可单独运行核心测试。
 
 - [开发、构建与安装](docs/DEVELOPMENT.md)
-- [数据布局、校验与恢复](docs/DATA_AND_RECOVERY.md)
 
 ## 致谢
 
