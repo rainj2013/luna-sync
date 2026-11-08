@@ -34,7 +34,7 @@ Luna Sync is a local iPhone photo backup app. Connect an external drive, choose 
 - **Verify before completion**: each resource is read back and checked with SHA-256 before its completion record is committed. A Live Photo is complete only when all its resources succeed.
 - **Keep backups independent**: the app does not delete photos from your phone or mirror library deletions to the drive.
 
-## Browse the drive, too
+## Photo & video browsing
 
 A separate file browser supports folders, grid and list views, search, sorting, image and video filters, original-file previews and swiping between files.
 
