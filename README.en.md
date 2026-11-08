@@ -4,6 +4,7 @@
   <p>Back up original iPhone photos and videos directly to your own drive.</p>
   <p>
     <a href="https://github.com/rainj2013/luna-sync/actions/workflows/ci.yml"><img src="https://github.com/rainj2013/luna-sync/actions/workflows/ci.yml/badge.svg" alt="Build and test"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/rainj2013/luna-sync?style=flat-square" alt="MIT License"></a>
     <img src="https://img.shields.io/badge/platform-iOS%2018%2B-5b8def?style=flat-square" alt="iOS 18 or later">
     <img src="https://img.shields.io/badge/Swift-SwiftUI%20%2B%20PhotoKit-a26043?style=flat-square" alt="SwiftUI and PhotoKit">
   </p>
@@ -62,3 +63,7 @@ The detailed guides below are currently in Chinese.
 ## Acknowledgments
 
 Thanks to [ZLPhotoBrowser](https://github.com/longitachi/ZLPhotoBrowser) and its contributors. The vendored modifications retain its Apache 2.0 license; see [Third-party notices](THIRD_PARTY_NOTICES.md).
+
+## License
+
+Luna Sync is released under the [MIT License](LICENSE). Third-party components retain their respective licenses; see [Third-party notices](THIRD_PARTY_NOTICES.md).

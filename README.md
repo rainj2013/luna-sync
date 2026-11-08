@@ -4,6 +4,7 @@
   <p>把 iPhone 里的照片和视频，直接备份到自己的硬盘。</p>
   <p>
     <a href="https://github.com/rainj2013/luna-sync/actions/workflows/ci.yml"><img src="https://github.com/rainj2013/luna-sync/actions/workflows/ci.yml/badge.svg" alt="构建与测试"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/rainj2013/luna-sync?style=flat-square" alt="MIT License"></a>
     <img src="https://img.shields.io/badge/platform-iOS%2018%2B-5b8def?style=flat-square" alt="iOS 18 及以上">
     <img src="https://img.shields.io/badge/Swift-SwiftUI%20%2B%20PhotoKit-a26043?style=flat-square" alt="SwiftUI 与 PhotoKit">
   </p>
@@ -60,3 +61,7 @@ Luna Sync 是一个纯本地的 iPhone 照片备份工具。接上外置存储�
 ## 致谢
 
 感谢 [ZLPhotoBrowser](https://github.com/longitachi/ZLPhotoBrowser) 及其作者和贡献者。项目使用的本地修改版保留了原 Apache 2.0 许可证，详见[第三方软件说明](THIRD_PARTY_NOTICES.md)。
+
+## 许可证
+
+Luna Sync 基于 [MIT License](LICENSE) 发布。第三方组件保留各自的许可证，详见[第三方软件说明](THIRD_PARTY_NOTICES.md)。
